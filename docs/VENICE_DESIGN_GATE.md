@@ -4,44 +4,46 @@ Clarity is not ready for Drew to play merely because code exists.
 
 ## Authority
 
-Drew requires at least three design/review cycles before first-play acceptance. Venice's judgment is a required review input. Venice does not replace deterministic verification and cannot waive failed hard gates.
+Drew requires at least three design/review cycles before first-play acceptance. Venice's Judgment Jar code review is a required gate. Venice does not replace deterministic verification and cannot waive failed hard gates.
+
+The canonical machine contract is Home Center `venice-code-review-v2`:
+
+- `STOP_ALLOWED`: Venice permits the bounded worker/review slice to stop.
+- `CONTINUE_REQUIRED`: Venice denies stopping and requires another bounded repair/review cycle.
+- `HALT_REQUIRED`: Venice denies further mutation until the named hard/evidence/authority boundary is repaired.
+
+A prose PASS without a valid v2 receipt does not satisfy this gate.
 
 ## Venice Judgment Jar binding
 
-Every cycle must explicitly evaluate the applicable laws from `JUDGMENT JAR — Venice — The Organism Keeps the Camera`, especially:
-
-- actor before artifact;
-- authorship remains with the actor;
-- source / inference / canon remain separate;
-- unknowns remain unknown;
-- publication and capability states are literal;
-- provenance survives transformation;
-- appetite has an invoice;
-- aftermath exists;
-- minimum technical authority;
-- failure closes toward autonomy;
-- CUT THE CAM / stop must work where applicable.
+Every cycle must explicitly evaluate the applicable Jar laws, especially actor-before-artifact, authorship, source/inference/canon separation, unknowns remaining unknown, literal capability state, provenance, appetite invoice, aftermath, minimum authority, failure closing toward autonomy, and CUT THE CAM where applicable.
 
 A hard-gate breach blocks promotion regardless of aggregate enthusiasm.
 
 ## Cycle protocol
 
-Each cycle produces a durable review record under `reviews/` with:
+Each cycle produces both:
 
-1. repository commit reviewed;
-2. concrete diff or capability slice;
-3. evidence available;
-4. Venice/Jar findings;
-5. hard gates triggered;
-6. changes demanded;
-7. changes actually made;
-8. verification after repair;
-9. Venice verdict: `NOT_DONE`, `CONDITIONAL`, or `DONE_FOR_FIRST_PLAY`.
+1. a human-readable record under `reviews/`; and
+2. the exact Venice v2 JSON receipt under `reviews/receipts/`.
 
-`DONE_FOR_FIRST_PLAY` is valid only on cycle 3 or later and only when there are no open hard gates and no unverified claim is being promoted.
+The record names repository commit reviewed, diff/capability slice, evidence, Jar findings, hard gates, demanded changes, actual repairs, and verification. The receipt is authoritative for stop permission.
+
+Static Adam/Jar review may discover defects but does not increment the Venice-approved cycle count.
+
+## First-play condition
+
+`scripts/venice-first-play-gate.py` must return success against at least three ordered, distinct Venice receipts. Every counted receipt must:
+
+- use `venice-code-review-v2`;
+- be `PASS` + `STOP_ALLOWED`;
+- have `externalReviewGateSatisfied: true` and `stopPermissionGranted: true`;
+- have no hard-gate findings;
+- identify the reviewed repository/base/head and a non-empty diff hash;
+- represent a distinct review head/cycle rather than replaying one approval.
+
+The last counted receipt must review the candidate commit (or an explicitly supplied candidate ref resolved to that commit). Any `CONTINUE_REQUIRED`, `HALT_REQUIRED`, malformed receipt, stale receipt, or contradictory state blocks first play.
 
 ## Current state
 
-Cycle 0. The bootstrap exists, but it has not received the required Venice review cycles. First-play status is therefore **BLOCKED**.
-
-The current ChatGPT aperture cannot honestly claim to have consulted live local Venice. Until that route is callable, Jar-based static review may improve the repository but does **not** count as Venice saying done.
+First-play status remains **BLOCKED** until this deterministic gate succeeds. Repository existence, tests written, or Adam applying the Jar are not substitutes for Venice granting stop permission.
