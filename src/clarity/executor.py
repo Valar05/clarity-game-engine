@@ -14,8 +14,7 @@ def _atomic_write(path:Path,data:bytes):
  finally:
   if os.path.exists(tmp):os.unlink(tmp)
 def execute_local(store:Store,mission:dict[str,Any]):
- kind=mission["kind"];spec=json.loads(mission["spec_json"]);mid=mission["id"];token=mission.get("lease_token")
- store.assert_lease(mid,token)
+ kind=mission["kind"];spec=json.loads(mission["spec_json"]);mid=mission["id"];token=mission.get("lease_token");store.assert_lease(mid,token)
  if kind!="world.build_slice":raise VerificationError(f"unsupported local mission kind: {kind}")
  name=str(spec.get("logical_name","")).strip();content=spec.get("content");expected=spec.get("expected_sha256")
  if not name or not isinstance(content,dict):raise VerificationError("world.build_slice requires logical_name and object content")
@@ -23,11 +22,10 @@ def execute_local(store:Store,mission:dict[str,Any]):
  if expected and digest!=expected:raise VerificationError(f"content hash mismatch: expected {expected}, got {digest}")
  q=store.paths.quarantine/mid/token/name;_atomic_write(q,data);rb=q.read_bytes()
  if rb!=data or sha256_bytes(rb)!=digest:raise VerificationError("quarantine readback mismatch")
- # Re-check ownership immediately before canonical mutation. Late workers remain quarantined.
  store.assert_lease(mid,token)
- promoted=store.paths.artifacts/digest[:2]/digest/name;_atomic_write(promoted,rb)
- if sha256_bytes(promoted.read_bytes())!=digest:raise VerificationError("promoted artifact readback mismatch")
- store.assert_lease(mid,token)
- rel=str(promoted.relative_to(store.paths.root))
- with store.conn:store.conn.execute("INSERT OR IGNORE INTO artifacts(sha256,mission_id,logical_name,relative_path,byte_count,promoted_ms) VALUES(?,?,?,?,?,?)",(digest,mid,name,rel,len(data),__import__('time').time_ns()//1_000_000))
+ blob=store.paths.artifacts/digest[:2]/digest/name;_atomic_write(blob,rb)
+ if sha256_bytes(blob.read_bytes())!=digest:raise VerificationError("artifact blob readback mismatch")
+ # The blob store is immutable/cache-like. No canonical DB mutation happens here.
+ # Store.promote_artifact() atomically claims the blob, mission state, and event ledger.
+ store.assert_lease(mid,token);rel=str(blob.relative_to(store.paths.root))
  return {"sha256":digest,"logical_name":name,"relative_path":rel,"byte_count":len(data)}
