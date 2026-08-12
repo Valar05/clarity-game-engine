@@ -1,0 +1,36 @@
+{
+  "schema": "clarity.provider-policy.v1",
+  "default_policy": "deny",
+  "providers": {
+    "local": {
+      "classification": "FREE_VERIFIED",
+      "enabled": true,
+      "network_required": false
+    },
+    "gemini": {
+      "classification": "FREE_BUT_METERED",
+      "enabled": false,
+      "network_required": true,
+      "activation_requires": [
+        "explicit adapter configuration",
+        "free-tier preflight",
+        "per-run budget guard"
+      ]
+    },
+    "google-cloud": {
+      "classification": "FREE_BUT_METERED",
+      "enabled": false,
+      "network_required": true,
+      "activation_requires": [
+        "service-specific free-tier verification",
+        "fail-closed quota guard",
+        "no billing-dependent fallback"
+      ]
+    },
+    "chatgpt": {
+      "classification": "OPTIONAL_EXTERNAL",
+      "enabled": false,
+      "network_required": true
+    }
+  }
+}
