@@ -1,0 +1,12 @@
+{
+  "logical_name": "april-test-node.json",
+  "content": {
+    "schema": "clarity.world-node.v1",
+    "id": "april-test-node",
+    "title": "April's House — Canary",
+    "location": "hotel.reception",
+    "characters": ["april"],
+    "offline": true,
+    "requires_model": false
+  }
+}
