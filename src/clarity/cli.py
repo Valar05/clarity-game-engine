@@ -7,7 +7,7 @@ from .storage import Store,paths,sha256_bytes
 def _json(v): print(json.dumps(v,indent=2,sort_keys=True,default=str))
 def cmd_init(a):
  s=Store(a.root)
- try:s.append_event("system.initialized",{"schema_version":3,"host":socket.gethostname()});s.checkpoint();_json({"ok":True,"root":str(s.paths.root)});return 0
+ try:s.append_event("system.initialized",{"schema_version":4,"host":socket.gethostname()});s.checkpoint();_json({"ok":True,"root":str(s.paths.root)});return 0
  finally:s.close()
 def _health(s):
  iok,i=s.integrity_check();cok,c=s.verify_chain();rok,r=s.verify_receipts();return iok and cok and rok,{"sqlite_integrity":i,"event_chain":c,"receipt_chain":r}
@@ -31,7 +31,7 @@ def cmd_run(a):
   if not row:_json({"ok":True,"worked":False,"reason":"queue_empty"});return 0
   m=dict(row);token=m["lease_token"]
   try:
-   result=execute_local(s,m);s.transition(m["id"],"promoted",lease_token=token,payload=result);_json({"ok":True,"worked":True,"mission_id":m["id"],"result":result});return 0
+   result=execute_local(s,m);s.promote_artifact(m["id"],token,result);_json({"ok":True,"worked":True,"mission_id":m["id"],"result":result});return 0
   except VerificationError as e:s.transition(m["id"],"rejected",lease_token=token,error=str(e));_json({"ok":False,"error":str(e)});return 3
   except BaseException as e:s.append_event("mission.worker_crash",{"owner":owner,"error":repr(e)},m["id"]);raise
  finally:s.close()
