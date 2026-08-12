@@ -7,10 +7,10 @@ from .storage import Store,paths,sha256_bytes
 def _json(v): print(json.dumps(v,indent=2,sort_keys=True,default=str))
 def cmd_init(a):
  s=Store(a.root)
- try:s.append_event("system.initialized",{"schema_version":2,"host":socket.gethostname()});s.checkpoint();_json({"ok":True,"root":str(s.paths.root)});return 0
+ try:s.append_event("system.initialized",{"schema_version":3,"host":socket.gethostname()});s.checkpoint();_json({"ok":True,"root":str(s.paths.root)});return 0
  finally:s.close()
 def _health(s):
- iok,i=s.integrity_check(); cok,c=s.verify_chain(); rok,r=s.verify_receipts(); return iok and cok and rok,{"sqlite_integrity":i,"event_chain":c,"receipt_chain":r}
+ iok,i=s.integrity_check();cok,c=s.verify_chain();rok,r=s.verify_receipts();return iok and cok and rok,{"sqlite_integrity":i,"event_chain":c,"receipt_chain":r}
 def cmd_status(a):
  s=Store(a.root)
  try:ok,h=_health(s);_json({"ok":ok,**h,"missions":s.rows_as_dicts(s.list_missions())});return 0 if ok else 2
@@ -18,7 +18,7 @@ def cmd_status(a):
 def cmd_add(a):
  s=Store(a.root)
  try:
-  spec=json.loads(Path(a.spec).read_text("utf-8"));mid=s.add_mission(a.kind,spec,a.idempotency_key);_json({"ok":True,"mission_id":mid});return 0
+  spec=json.loads(Path(a.spec).read_text("utf-8"));mid=s.add_mission(a.kind,spec,a.idempotency_key,a.max_attempts);_json({"ok":True,"mission_id":mid});return 0
  finally:s.close()
 def cmd_list(a):
  s=Store(a.root)
@@ -39,6 +39,10 @@ def cmd_recover(a):
  s=Store(a.root)
  try:n=s.recover_expired();ok,h=_health(s);s.checkpoint();_json({"ok":ok,"recovered":n,**h});return 0 if ok else 2
  finally:s.close()
+def cmd_requeue(a):
+ s=Store(a.root)
+ try:s.requeue_blocked(a.mission_id,new_max_attempts=a.max_attempts);_json({"ok":True,"mission_id":a.mission_id});return 0
+ finally:s.close()
 def cmd_verify(a):
  s=Store(a.root)
  try:
@@ -47,17 +51,37 @@ def cmd_verify(a):
    p=s.paths.root/r["relative_path"]
    if not p.exists():missing.append(r["relative_path"])
    elif sha256_bytes(p.read_bytes())!=r["sha256"]:bad.append(r["relative_path"])
-  ok=ok and not missing and not bad;_json({"ok":ok,**h,"missing_artifacts":missing,"bad_artifact_hashes":bad});return 0 if ok else 2
+  orphans=[str(p.relative_to(s.paths.root)) for p in s.orphan_artifacts()]
+  ok=ok and not missing and not bad;_json({"ok":ok,**h,"missing_artifacts":missing,"bad_artifact_hashes":bad,"orphan_artifacts":orphans});return 0 if ok else 2
+ finally:s.close()
+def cmd_repair_receipts(a):
+ s=Store(a.root)
+ try:n=s.rebuild_receipts();ok,h=_health(s);_json({"ok":ok,"rebuilt_receipts":n,**h});return 0 if ok else 2
+ finally:s.close()
+def cmd_snapshot(a):
+ s=Store(a.root)
+ try:p=s.create_snapshot(a.label);_json({"ok":True,"snapshot":str(p)});return 0
+ finally:s.close()
+def cmd_restore(a):
+ target=paths(a.root).root;Store.restore_snapshot(target,a.snapshot);s=Store(target)
+ try:ok,h=_health(s);_json({"ok":ok,"root":str(target),**h});return 0 if ok else 2
+ finally:s.close()
+def cmd_gc(a):
+ s=Store(a.root)
+ try:n=s.gc_orphan_artifacts();_json({"ok":True,"removed_orphans":n});return 0
  finally:s.close()
 def cmd_doctor(a):
  p=paths(a.root);checks={"python":sys.version.split()[0],"root_parent_exists":p.root.parent.exists(),"root_parent_writable":os.access(p.root.parent,os.W_OK),"platform":sys.platform,"termux":"com.termux" in os.environ.get("PREFIX","")};ok=checks["root_parent_exists"] and checks["root_parent_writable"];_json({"ok":ok,"checks":checks});return 0 if ok else 2
 def build_parser():
  p=argparse.ArgumentParser(prog="clarity");p.add_argument("--root");sub=p.add_subparsers(dest="command",required=True)
- for name,fn in [("init",cmd_init),("status",cmd_status),("doctor",cmd_doctor),("recover",cmd_recover),("verify",cmd_verify)]:x=sub.add_parser(name);x.set_defaults(func=fn)
+ for name,fn in [("init",cmd_init),("status",cmd_status),("doctor",cmd_doctor),("recover",cmd_recover),("verify",cmd_verify),("repair-receipts",cmd_repair_receipts),("gc",cmd_gc)]:x=sub.add_parser(name);x.set_defaults(func=fn)
+ x=sub.add_parser("snapshot");x.add_argument("--label");x.set_defaults(func=cmd_snapshot)
+ x=sub.add_parser("restore");x.add_argument("snapshot");x.set_defaults(func=cmd_restore)
  mission=sub.add_parser("mission");ms=mission.add_subparsers(dest="mission_command",required=True)
- x=ms.add_parser("add");x.add_argument("--kind",required=True);x.add_argument("--spec",required=True);x.add_argument("--idempotency-key");x.set_defaults(func=cmd_add)
+ x=ms.add_parser("add");x.add_argument("--kind",required=True);x.add_argument("--spec",required=True);x.add_argument("--idempotency-key");x.add_argument("--max-attempts",type=int);x.set_defaults(func=cmd_add)
  x=ms.add_parser("list");x.set_defaults(func=cmd_list)
  x=ms.add_parser("run");x.add_argument("--once",action="store_true");x.add_argument("--owner");x.add_argument("--lease-ms",type=int,default=120000);x.set_defaults(func=cmd_run)
+ x=ms.add_parser("requeue");x.add_argument("mission_id");x.add_argument("--max-attempts",type=int);x.set_defaults(func=cmd_requeue)
  return p
 def main(argv=None):a=build_parser().parse_args(argv);return int(a.func(a))
 if __name__=="__main__":raise SystemExit(main())
