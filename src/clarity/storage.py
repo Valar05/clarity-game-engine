@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any,Iterable
 
-SCHEMA_VERSION=4
+SCHEMA_VERSION=5
 TERMINAL_STATES={"promoted","rejected","cancelled"}
 DEFAULT_MAX_ATTEMPTS=int(os.environ.get("CLARITY_MAX_ATTEMPTS","5"))
 
@@ -44,7 +44,9 @@ class Store:
         CREATE TABLE IF NOT EXISTS missions(id TEXT PRIMARY KEY,kind TEXT NOT NULL,spec_json TEXT NOT NULL,spec_sha256 TEXT NOT NULL,state TEXT NOT NULL,created_ms INTEGER NOT NULL,updated_ms INTEGER NOT NULL,attempt INTEGER NOT NULL DEFAULT 0,max_attempts INTEGER NOT NULL DEFAULT 5,lease_owner TEXT,lease_until_ms INTEGER,lease_token TEXT,idempotency_key TEXT UNIQUE,last_error TEXT);
         CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,event_id TEXT NOT NULL UNIQUE,mission_id TEXT,type TEXT NOT NULL,payload_json TEXT NOT NULL,created_ms INTEGER NOT NULL,prev_hash TEXT,event_hash TEXT NOT NULL UNIQUE,FOREIGN KEY(mission_id) REFERENCES missions(id));
         CREATE TABLE IF NOT EXISTS artifacts(sha256 TEXT PRIMARY KEY,mission_id TEXT NOT NULL,logical_name TEXT NOT NULL,relative_path TEXT NOT NULL,byte_count INTEGER NOT NULL,promoted_ms INTEGER NOT NULL,FOREIGN KEY(mission_id) REFERENCES missions(id));
-        CREATE INDEX IF NOT EXISTS idx_missions_state ON missions(state,created_ms);CREATE INDEX IF NOT EXISTS idx_events_mission ON events(mission_id,seq);
+        CREATE TABLE IF NOT EXISTS mission_artifacts(mission_id TEXT NOT NULL,sha256 TEXT NOT NULL,logical_name TEXT NOT NULL,relative_path TEXT NOT NULL,byte_count INTEGER NOT NULL,promoted_ms INTEGER NOT NULL,PRIMARY KEY(mission_id,logical_name),FOREIGN KEY(mission_id) REFERENCES missions(id));
+        CREATE INDEX IF NOT EXISTS idx_missions_state ON missions(state,created_ms);CREATE INDEX IF NOT EXISTS idx_events_mission ON events(mission_id,seq);CREATE INDEX IF NOT EXISTS idx_mission_artifacts_sha ON mission_artifacts(sha256);
+        INSERT OR IGNORE INTO mission_artifacts(mission_id,sha256,logical_name,relative_path,byte_count,promoted_ms) SELECT mission_id,sha256,logical_name,relative_path,byte_count,promoted_ms FROM artifacts;
         """)
         cols={r[1] for r in self.conn.execute("PRAGMA table_info(missions)")}
         if "lease_token" not in cols:self.conn.execute("ALTER TABLE missions ADD COLUMN lease_token TEXT")
@@ -115,7 +117,7 @@ class Store:
         if not p.exists() or sha256_bytes(p.read_bytes())!=result["sha256"]:raise RuntimeError("artifact missing or hash changed before promotion")
         self.conn.execute("BEGIN IMMEDIATE")
         try:
-            r=self._assert_lease_tx(mid,lease_token);self.conn.execute("INSERT OR IGNORE INTO artifacts(sha256,mission_id,logical_name,relative_path,byte_count,promoted_ms) VALUES(?,?,?,?,?,?)",(result["sha256"],mid,result["logical_name"],result["relative_path"],result["byte_count"],utc_ms()));self.conn.execute("UPDATE missions SET state='promoted',updated_ms=?,last_error=NULL,lease_owner=NULL,lease_until_ms=NULL,lease_token=NULL WHERE id=?",(utc_ms(),mid));self._insert_event_tx("mission.promoted",{"from":r["state"],**result},mid);self.conn.execute("COMMIT")
+            r=self._assert_lease_tx(mid,lease_token);when=utc_ms();self.conn.execute("INSERT OR IGNORE INTO artifacts(sha256,mission_id,logical_name,relative_path,byte_count,promoted_ms) VALUES(?,?,?,?,?,?)",(result["sha256"],mid,result["logical_name"],result["relative_path"],result["byte_count"],when));self.conn.execute("INSERT INTO mission_artifacts(mission_id,sha256,logical_name,relative_path,byte_count,promoted_ms) VALUES(?,?,?,?,?,?)",(mid,result["sha256"],result["logical_name"],result["relative_path"],result["byte_count"],when));self.conn.execute("UPDATE missions SET state='promoted',updated_ms=?,last_error=NULL,lease_owner=NULL,lease_until_ms=NULL,lease_token=NULL WHERE id=?",(when,mid));self._insert_event_tx("mission.promoted",{"from":r["state"],**result},mid);self.conn.execute("COMMIT")
         except BaseException:
             if self.conn.in_transaction:self.conn.execute("ROLLBACK")
             raise
@@ -169,7 +171,7 @@ class Store:
         try:self.conn.backup(dst)
         finally:dst.close()
         receipts=self.paths.receipts.read_bytes() if self.paths.receipts.exists() else b"";_atomic_bytes(target/"receipts.jsonl",receipts);entries=[]
-        for r in self.conn.execute("SELECT sha256,relative_path FROM artifacts ORDER BY sha256"):
+        for r in self.conn.execute("SELECT DISTINCT sha256,relative_path FROM mission_artifacts ORDER BY sha256"):
             src=self.paths.root/r["relative_path"]
             if not src.exists() or sha256_bytes(src.read_bytes())!=r["sha256"]:raise RuntimeError(f"cannot snapshot missing/corrupt artifact: {r['relative_path']}")
             rel=Path(r["relative_path"]).relative_to("artifacts");dstp=target/"artifacts"/rel;dstp.parent.mkdir(parents=True,exist_ok=True)
@@ -190,7 +192,7 @@ class Store:
         for e in m.get("artifacts",[]):_atomic_bytes(root/"artifacts"/e["relative_path"],(snap/"artifacts"/e["relative_path"]).read_bytes())
         _fsync_dir(root)
     def orphan_artifacts(self):
-        refs={str((self.paths.root/r[0]).resolve()) for r in self.conn.execute("SELECT relative_path FROM artifacts")};return [p for p in self.paths.artifacts.rglob("*") if p.is_file() and str(p.resolve()) not in refs]
+        refs={str((self.paths.root/r[0]).resolve()) for r in self.conn.execute("SELECT DISTINCT relative_path FROM mission_artifacts")};return [p for p in self.paths.artifacts.rglob("*") if p.is_file() and str(p.resolve()) not in refs]
     def gc_orphan_artifacts(self):
         xs=self.orphan_artifacts()
         for p in xs:p.unlink(missing_ok=True)
