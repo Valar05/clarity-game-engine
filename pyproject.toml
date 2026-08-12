@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "clarity-game-engine"
+version = "0.1.0"
+description = "CLI-first, phone-sovereign durable game construction runtime"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+clarity = "clarity.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
