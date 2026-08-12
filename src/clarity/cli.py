@@ -7,7 +7,7 @@ from .storage import Store,paths,sha256_bytes
 def _json(v): print(json.dumps(v,indent=2,sort_keys=True,default=str))
 def cmd_init(a):
  s=Store(a.root)
- try:s.append_event("system.initialized",{"schema_version":4,"host":socket.gethostname()});s.checkpoint();_json({"ok":True,"root":str(s.paths.root)});return 0
+ try:s.append_event("system.initialized",{"schema_version":5,"host":socket.gethostname()});s.checkpoint();_json({"ok":True,"root":str(s.paths.root)});return 0
  finally:s.close()
 def _health(s):
  iok,i=s.integrity_check();cok,c=s.verify_chain();rok,r=s.verify_receipts();return iok and cok and rok,{"sqlite_integrity":i,"event_chain":c,"receipt_chain":r}
@@ -17,8 +17,7 @@ def cmd_status(a):
  finally:s.close()
 def cmd_add(a):
  s=Store(a.root)
- try:
-  spec=json.loads(Path(a.spec).read_text("utf-8"));mid=s.add_mission(a.kind,spec,a.idempotency_key,a.max_attempts);_json({"ok":True,"mission_id":mid});return 0
+ try:spec=json.loads(Path(a.spec).read_text("utf-8"));mid=s.add_mission(a.kind,spec,a.idempotency_key,a.max_attempts);_json({"ok":True,"mission_id":mid});return 0
  finally:s.close()
 def cmd_list(a):
  s=Store(a.root)
@@ -30,8 +29,7 @@ def cmd_run(a):
   s.recover_expired();row=s.lease_next(owner,a.lease_ms)
   if not row:_json({"ok":True,"worked":False,"reason":"queue_empty"});return 0
   m=dict(row);token=m["lease_token"]
-  try:
-   result=execute_local(s,m);s.promote_artifact(m["id"],token,result);_json({"ok":True,"worked":True,"mission_id":m["id"],"result":result});return 0
+  try:result=execute_local(s,m);s.promote_artifact(m["id"],token,result);_json({"ok":True,"worked":True,"mission_id":m["id"],"result":result});return 0
   except VerificationError as e:s.transition(m["id"],"rejected",lease_token=token,error=str(e));_json({"ok":False,"error":str(e)});return 3
   except BaseException as e:s.append_event("mission.worker_crash",{"owner":owner,"error":repr(e)},m["id"]);raise
  finally:s.close()
@@ -47,12 +45,11 @@ def cmd_verify(a):
  s=Store(a.root)
  try:
   ok,h=_health(s);missing=[];bad=[]
-  for r in s.conn.execute("SELECT * FROM artifacts"):
+  for r in s.conn.execute("SELECT DISTINCT sha256,relative_path FROM mission_artifacts"):
    p=s.paths.root/r["relative_path"]
    if not p.exists():missing.append(r["relative_path"])
    elif sha256_bytes(p.read_bytes())!=r["sha256"]:bad.append(r["relative_path"])
-  orphans=[str(p.relative_to(s.paths.root)) for p in s.orphan_artifacts()]
-  ok=ok and not missing and not bad;_json({"ok":ok,**h,"missing_artifacts":missing,"bad_artifact_hashes":bad,"orphan_artifacts":orphans});return 0 if ok else 2
+  orphans=[str(p.relative_to(s.paths.root)) for p in s.orphan_artifacts()];ok=ok and not missing and not bad;_json({"ok":ok,**h,"missing_artifacts":missing,"bad_artifact_hashes":bad,"orphan_artifacts":orphans});return 0 if ok else 2
  finally:s.close()
 def cmd_repair_receipts(a):
  s=Store(a.root)
