@@ -2,7 +2,8 @@ from __future__ import annotations
 import argparse,json,os,socket,sys
 from pathlib import Path
 from .executor import VerificationError,execute_local
-from .storage import Store,paths,sha256_bytes
+from .durable_store import DurableStore as Store
+from .storage import paths,sha256_bytes
 
 def _json(v): print(json.dumps(v,indent=2,sort_keys=True,default=str))
 def cmd_init(a):
